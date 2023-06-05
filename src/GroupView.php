@@ -104,6 +104,7 @@ require 'Include/Header.php';
     $rsEmailList = RunQuery($sSQL);
     $sEmailLink = '';
     $sMailtoDelimiter = AuthenticationManager::GetCurrentUser()->getUserConfigString("sMailtoDelimiter");
+    $roleEmails = array();
     while (list($per_Email, $fam_Email, $virt_RoleName) = mysqli_fetch_row($rsEmailList)) {
         $sEmail = SelectWhichInfo($per_Email, $fam_Email, false);
         if ($sEmail) {

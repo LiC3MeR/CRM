@@ -30,11 +30,6 @@ foreach ($sundaySchoolService->getKidsBirthdayMonth($iGroupId) as $birthDayMonth
 }
 $birthDayMonthChartJSON = implode(',', $birthDayMonthChartArray);
 
-$genderChartArray = [];
-foreach ($sundaySchoolService->getKidsGender($iGroupId) as $gender => $kidsCount) {
-    array_push($genderChartArray, "{label: '".gettext($gender)."', data: ".$kidsCount.'}');
-}
-$genderChartJSON = implode(',', $genderChartArray);
 
 $rsTeachers = $sundaySchoolService->getClassByRole($iGroupId, 'Teacher');
 $sPageTitle = gettext('Sunday School').': '.$iGroupName;
@@ -71,11 +66,12 @@ require '../Include/Header.php';
   </div>
   <div class="card-body">
     <?php
+    $roleEmails = array();
     $sMailtoDelimiter = AuthenticationManager::GetCurrentUser()->getUserConfigString("sMailtoDelimiter");
     $allEmails = array_unique(array_merge($ParentsEmails, $KidsEmails, $TeachersEmails));
-    $roleEmails->Parents = implode($sMailtoDelimiter, $ParentsEmails).',';
-    $roleEmails->Teachers = implode($sMailtoDelimiter, $TeachersEmails).',';
-    $roleEmails->Kids = implode($sMailtoDelimiter, $KidsEmails).',';
+    $roleEmails['Parents'] = implode($sMailtoDelimiter, $ParentsEmails).',';
+    $roleEmails['Teachers'] = implode($sMailtoDelimiter, $TeachersEmails).',';
+    $roleEmails['Kids'] = implode($sMailtoDelimiter, $KidsEmails).',';
     $sEmailLink = implode($sMailtoDelimiter, $allEmails).',';
     // Add default email if default email has been set and is not already in string
     if (SystemConfig::getValue('sToEmailAddress') != '' && !stristr($sEmailLink, SystemConfig::getValue('sToEmailAddress'))) {
@@ -87,26 +83,26 @@ require '../Include/Header.php';
       // Display link
       ?>
       <div class="btn-group">
-        <a class="btn btn-app" href="mailto:<?= mb_substr($sEmailLink, 0, -3) ?>"><i
-            class="fa fa-paper-plane"></i><?= gettext('Email') ?></a>
+        <a class="btn btn-app" href="mailto:<?= mb_substr($sEmailLink, 0, -3) ?>">
+        <i class="fa fa-paper-plane"></i><?= gettext('Email') ?></a>
         <button type="button" class="btn btn-app dropdown-toggle" data-toggle="dropdown">
           <span class="caret"></span>
           <span class="sr-only"><?= gettext('Toggle Dropdown') ?></span>
         </button>
         <ul class="dropdown-menu" role="menu">
-          <?php generateGroupRoleEmailDropdown($roleEmails, 'mailto:') ?>
+          <?php generateGroupRoleEmailDropdown($roleEmails['Parents'], 'mailto:') ?>
         </ul>
       </div>
 
       <div class="btn-group">
-        <a class="btn btn-app" href="mailto:?bcc=<?= mb_substr($sEmailLink, 0, -3) ?>"><i
-            class="fa fa-send"></i><?= gettext('Email (BCC)') ?></a>
+        <a class="btn btn-app" href="mailto:?bcc=<?= mb_substr($sEmailLink, 0, -3) ?>">
+        <i class="fa fa-paper-plane"></i></i><?= gettext('Email (BCC)') ?></a>
         <button type="button" class="btn btn-app dropdown-toggle" data-toggle="dropdown">
           <span class="caret"></span>
           <span class="sr-only"><?= gettext('Toggle Dropdown') ?></span>
         </button>
         <ul class="dropdown-menu" role="menu">
-          <?php generateGroupRoleEmailDropdown($roleEmails, 'mailto:?bcc=') ?>
+          <?php generateGroupRoleEmailDropdown($roleEmails['Parents'], 'mailto:?bcc=') ?>
         </ul>
       </div>
       <?php
@@ -138,7 +134,7 @@ require '../Include/Header.php';
             <a href="mailto:<?= $teacher['per_Email'] ?>" type="button" class="btn btn-primary btn-sm btn-block"><i
                 class="fa fa-envelope"></i> <?= gettext('Send Message') ?></a>
             <a href="../PersonView.php?PersonID=<?= $teacher['per_ID'] ?>" type="button"
-               class="btn btn-primary btn-info btn-block"><i class="fa fa-q"></i><?= gettext('View Profile') ?></a>
+               class="btn btn-primary btn-info btn-block"><i class="fa fa-eye"></i> <?= gettext('View Profile') ?></a>
           </div>
         </div>
       </div>
@@ -163,7 +159,7 @@ require '../Include/Header.php';
         <div class="card-header">
           <i class="fa fa-chart-bar"></i>
 
-          <h3 class="card-title"><?= gettext('Birthdays by Month') ?></h3>
+          <h3 class="card-title"><?= gettext('Birthdays by Month') ?> </h3>
         </div>
         <div class="card-body">
           <div class="disableSelection" id="bar-chart" style="width: 100%; height: 300px;"></div>
@@ -177,11 +173,10 @@ require '../Include/Header.php';
       <div class="card card-primary">
         <div class="card-header">
           <i class="fa fa-chart-bar"></i>
-
           <h3 class="card-title"><?= gettext('Gender') ?></h3>
         </div>
         <div class="card-body">
-          <div id="donut-chart" style="width: 100%; height: 300px;"></div>
+          <canvas id="donutChart" style="min-height: 250px; height: 250px; max-height: 250px; max-width: 100%;"></canvas>
         </div>
         <!-- /.box-body-->
       </div>
@@ -333,6 +328,8 @@ function implodeUnique($array, $withQuotes)
 <!-- FLOT CATEGORIES PLUGIN - Used to draw bar charts -->
 <script  src="<?= SystemURLs::getRootPath() ?>/skin/external/flot/jquery.flot.categories.js"></script>
 
+<script src="<?= SystemURLs::getRootPath() ?>/skin/external/chartjs/Chart.js"></script>
+
 <script nonce="<?= SystemURLs::getCSPNonce() ?>">
   $(document).ready(function () {
 
@@ -368,94 +365,44 @@ function implodeUnique($array, $withQuotes)
     birthDayFilter.find('i.fa-close')
       .bind('click', hideBirthDayFilter);
 
-    $("#bar-chart").bind("plotclick", function (event, pos, item) {
-      plot.unhighlight();
-
-      if (!item) {
-        hideBirthDayFilter();
-        return;
-      }
-
-      var month = bar_data.data[item.dataIndex][0];
-
-      birthDateColumn
-        .search(month.substr(0, 3))
-        .draw();
-
-      birthDayMonth.text(month);
-      birthDayFilter.show();
-
-      plot.highlight(item.series, item.datapoint);
-    });
+    ;
   });
 
-  /*
-   * BAR CHART
-   * ---------
-   */
-
-  var bar_data = {
-    data: [
-      <?= $birthDayMonthChartJSON ?>
-    ],
-    color: "#3c8dbc"
-  };
-
- var plot = $.plot("#bar-chart", [bar_data], {
-    grid: {
-      borderWidth: 1,
-      borderColor: "#f3f3f3",
-      tickColor: "#f3f3f3",
-      hoverable:true,
-      clickable:true
-    },
-    series: {
-      bars: {
-        show: true,
-        barWidth: 0.5,
-        align: "center"
-      }
-    },
-    xaxis: {
-      mode: "categories",
-      tickLength: 0
-    },
-    yaxis: {
-      tickSize: 1
-    }
-  });
-
-  /* END BAR CHART */
 
   /*
    * DONUT CHART
    * -----------
    */
-
-  var donutData = [<?=$genderChartJSON ?>];
-
-  $.plot("#donut-chart", donutData, {
-    series: {
-      pie: {
-        show: true,
-        radius: 1,
-        innerRadius: 0.5,
-        label: {
-          show: true,
-          radius: 2 / 3,
-          formatter: labelFormatter,
-          threshold: 0.1
-        }
-
+  var donutChartCanvas = $('#donutChart').get(0).getContext('2d')
+  var donutData        = {
+    labels: [
+      <?php foreach ($sundaySchoolService->getKidsGender($iGroupId) as $gender => $kidsCount) {
+        echo "'".gettext($gender)."',";
+      } ?>
+    ],
+    datasets: [
+      {
+        data: [      
+          <?php foreach ($sundaySchoolService->getKidsGender($iGroupId) as $gender => $kidsCount) {
+            echo gettext($kidsCount).",";
+          } ?>
+      ],
+        backgroundColor : ['#f56954', '#00a65a', '#f39c12'],
       }
-    },
-    legend: {
-      show: false
-    }
-  });
-  /*
-   * END DONUT CHART
-   */
+    ]
+  }
+  var donutOptions     = {
+    maintainAspectRatio : false,
+    responsive : true,
+  }
+  //Create pie or douhnut chart
+  // You can switch between pie and douhnut using the method below.
+  new Chart(donutChartCanvas, {
+    type: 'doughnut',
+    data: donutData,
+    options: donutOptions
+  })
+
   /*
    * Custom Label formatter
    * ----------------------
